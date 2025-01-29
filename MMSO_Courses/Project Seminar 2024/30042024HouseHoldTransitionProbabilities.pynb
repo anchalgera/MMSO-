@@ -1,0 +1,221 @@
+import numpy as np
+# Code for getting the transition probability matrix of infections inside a household SIS model
+# And calculating what happens after a given amount of transitions
+
+# -----------------------------------------------------------------------------------------------
+# Global Parameters -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+# arbitrarily chosen parameters for now
+beta  = np.random.rand() # transmission rate
+gamma = np.random.rand() # recovery rate
+I     = np.random.rand() # percentage of infected people of the whole population [0,1]
+
+# -----------------------------------------------------------------------------------------------
+# Auxiliary functions ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+def factorial(n):
+    res = 1
+    while n > 1:
+        res *= n
+        n -= 1
+    return res
+
+def BinomialCoefficient(n,k):
+    '''
+    Combination Function ("n choose k"): 
+    Computes the number of ways to choose k elements from a set of 
+    n elements without regard to the order of selection.
+    '''
+    if k > n:
+        return 0
+    return factorial(n) / (factorial(n-k) * factorial(k))
+
+def print_matrix_rounded(M):
+    '''
+    Prints a matrix with rounded entries for better visibility.
+    '''
+    for row in M:
+        for element in row:
+            print("{:.3f}".format(element), end="\t")
+        print()
+
+def Row_Sum_Check(M):
+    '''
+    Checks if all row sums of a stochastic matrix are equal to one
+    '''
+    row_sums = np.sum(M, axis=1)
+    return row_sums
+
+def Vector_Sum_Check(v):
+    '''
+    Check if the elements of a vector add up to 1.
+    '''
+    return np.sum(v)
+
+# -----------------------------------------------------------------------------------------------
+# Infection Probabilities -----------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+def P(i,I):
+    ''' 
+    Probability of getting infected from household and outside ('globally').
+    Calculates the probability that an individual becomes infected given i already 
+    infected individuals in the household and a global infection rate I.
+    i: i infected individuals in a household
+    I: Infected population percentage
+    '''
+    return 1 - (1-beta)**i * (1-beta*I)
+
+def q(n,j,i):
+    '''
+    Probability of j agents getting newly infected in a household of n people
+    where i people are already infected.
+    n: amount of people in the household
+    j: new infected agents in a household
+    i: already infected agents in a household
+    '''
+    return BinomialCoefficient(n-i,j) * P(i,I)**j * (1 - P(i,I))**((n-i)-j)
+
+def r(k,i):
+    '''
+    Probability of k agents recovering in a given time step.
+    k: agents recovering in the household
+    i: already infected agents in a household
+    '''
+    return BinomialCoefficient(i,k) * gamma**k * (1-gamma)**(i-k)
+
+# -----------------------------------------------------------------------------------------------
+# Single Household Transition Matrix ------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+def TransitionRate(n,i,j,k):
+    '''
+    Transition probabilities from state H_i^n to H_(i+j-k)^n
+    Multiplies the probabilities of j new infections and k recoveries to compute the transition rate 
+    from i infected individuals to i + j - k individuals.
+    n: amount of people in the household
+    i: already infected
+    j: newly infected
+    k: recovered
+    '''
+    return q(n,j,i) * r(k,i)
+    
+def MarkovMatrix(n):
+    '''
+    Fills a Markov Matrix of all transition rates H_i^n to H_(i+j-k)^n from i = 0,...,n.
+    Creates a matrix to represent all possible transitions between states of infection within the household
+    ensuring each row sums to 1 for probability "conservation".
+    '''
+    M = np.zeros((n+1,n+1))
+    for row in range(n+1):
+        for col in range(n+1):
+            # already infected i = row index since index starts at 0 for 0 already infected (q^i r^i)
+            # new infections   j = 0 if less or equal diagonal index, then counting upward
+            # recoveries       k = counting downward, then 0 if at or higher diagonal index
+            i = row
+            j = 0 if row >= col else col - i
+            k = 0 if col >= row else row - col
+            M[row,col] = TransitionRate(n,i,j,k)
+    # Normalizing the rows
+    for row in range(n+1):
+        total = np.sum(M[row, :])
+        M[row, :] = M[row, :] / total
+    return M
+
+def TotalTransitions_EqOfMotion(M):
+    '''
+    Calculate equations of motion of the household system: 
+    sum of all people getting to a certain state minus those leaving from it.
+    Because of the nature of the calculation, the current state cancels out automatically.
+    M: The Markov transition matrix (n+1 x n+1 matrix).
+    '''
+    col_sums = np.sum(M, axis=0)
+    row_sums = np.sum(M, axis=1)
+    # Compute transitions: sum of the column elements minus sum of the row elements for each row
+    transitions = col_sums - row_sums
+    return transitions
+
+def TransitionRatesAfterNsteps(MarkovMatrix,init_distribution,steps):
+    '''
+    Calculate the transition probabilities after "steps" steps, i.e. raising the Markov Matrix
+    to the "step"-th power. Also taking care of normalization again.
+    MarkovMatrix: The transition matrix
+    initial_distribution: initial distribution of infected people in a household.
+    steps: Number of transitions.
+    '''
+    resultMatrix = np.linalg.matrix_power(MarkovMatrix, steps)
+    result_distribution = np.dot(resultMatrix, init_distribution)
+    return result_distribution / np.sum(result_distribution)
+
+# -----------------------------------------------------------------------------------------------
+# Multi Household -------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+
+def HouseholdGenerator(n,i):
+    '''
+    Generate a household of size n with i infected
+    '''
+    return [n,i]
+    
+def TotalNumberOfInfected(HouseHoldMatrices):
+    InfectedTotal = 0
+    for Household in HouseHoldMatrices:
+        for i in range(Household[0]):
+            InfectedTotal += i * Household[1]
+    return InfectedTotal
+    
+
+# -----------------------------------------------------------------------------------------------
+# Example output for one household --------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+def TestSingleHousehold():
+    '''
+    Test function to verify codes for a single household.
+    Here the household size must be 4 since init_distribution is of lenght 5.
+    '''
+    n = 4
+    # print the randomly generated values
+    print(f'beta = {beta}')
+    print(f'gamma = {gamma}')
+    print(f'I = {I}')
+    # Test case for generating a Markov matrix for a household of n = 4 people
+    # and checking how many leave or get added to a state
+    M = MarkovMatrix(n)
+    transitions = TotalTransitions_EqOfMotion(M)
+    # Test case for providing an initial infection distribution and then seeing the result after 10 steps
+    init_distribution = [0.9,0.1,0,0,0] #90% of households start with zero infections, 10% 1 infection
+    steps = 10
+    Result_distribution = TransitionRatesAfterNsteps(M,init_distribution,steps)
+    # Printing the results of the above two tests
+    print(f'Initial Distribution: {init_distribution}')
+    print('The initial Markov Matrix: ')
+    print_matrix_rounded(M)
+    print(f'Row sums = {Row_Sum_Check(M)}')
+    print(f'Total Transitions: {transitions}')
+    print(f'Distribution after {steps} steps: {Result_distribution}')
+    print(f'Distribution sum check = {Vector_Sum_Check(Result_distribution)}')
+
+# -----------------------------------------------------------------------------------------------
+# Example output for many households ------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
+
+def TestManyHouseholds():
+    '''
+    Find out total number of infected people from a two household system
+    '''
+    # Households (n,i)
+    HouseHold1 = HouseholdGenerator(2,2)
+    HouseHold2 = HouseholdGenerator(2,2)
+    HouseHold3 = HouseholdGenerator(3,1)
+    HouseHoldMatrices = [HouseHold1, HouseHold2, HouseHold3]
+    Itotal = TotalNumberOfInfected(HouseHoldMatrices)
+    print(Itotal)
+    
+TestManyHouseholds()
+
+
+
